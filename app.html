@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BT Nav Signal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
+        button { padding: 15px 25px; font-size: 18px; margin: 10px; border-radius: 8px; border: none; cursor: pointer; }
+        #connect { background: #007bff; color: white; }
+        #status { font-weight: bold; margin: 20px; color: #555; }
+        .indicator { font-size: 50px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <h2>BT Turn Signal Nav</h2>
+    
+    <button id="connect">1. Connect Bluetooth</button>
+    <div id="status">Status: Disconnected</div>
+
+    <hr>
+
+    <input type="text" id="dest" placeholder="Enter Destination (e.g. London)">
+    <button onclick="startNav()" style="background: #28a745; color: white;">2. Start Navigation</button>
+
+    <div class="indicator" id="arrow">⚪</div>
+    <p id="instruction">Waiting for route...</p>
+
+    <script>
+        let btCharacteristic;
+
+        // --- BLUETOOTH LOGIC ---
+        document.getElementById('connect').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: ['0000ffe0-0000-1000-8000-00805f9b34fb'] }] // Standard HC-05/06 UUID
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                btCharacteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+                
+                document.getElementById('status').innerText = "Status: Connected ✅";
+            } catch (error) {
+                console.log(error);
+                alert("Connection failed. Ensure you are on HTTPS.");
+            }
+        });
+
+        async function sendBT(command) {
+            if (btCharacteristic) {
+                const encoder = new TextEncoder();
+                await btCharacteristic.writeValue(encoder.encode(command));
+            }
+        }
+
+        // --- NAVIGATION LOGIC ---
+        function startNav() {
+            if (!navigator.geolocation) {
+                alert("Geolocation not supported");
+                return;
+            }
+
+            navigator.geolocation.watchPosition(async (pos) => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                const dest = document.getElementById('dest').value;
+
+                // Using OSRM (Open Source Routing Machine) - A FREE API (No Key Needed!)
+                // Note: This is a demo endpoint. For heavy use, get a project-osrm.org key.
+                const url = `https://router.project-osrm.org/route/v1/driving/${lon},${lat};-0.12,51.5?steps=true`;
+                
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    const nextStep = data.routes[0].legs[0].steps[0].maneuver.type;
+                    const instruction = data.routes[0].legs[0].steps[0].maneuver.modifier;
+
+                    document.getElementById('instruction').innerText = "Next: " + instruction;
+
+                    if (instruction.includes("left")) {
+                        document.getElementById('arrow').innerText = "⬅️";
+                        sendBT("L");
+                    } else if (instruction.includes("right")) {
+                        document.getElementById('arrow').innerText = "➡️";
+                        sendBT("R");
+                    } else {
+                        document.getElementById('arrow').innerText = "⬆️";
+                        sendBT("F");
+                    }
+                } catch (e) {
+                    console.log("Route error:", e);
+                }
+            }, (err) => console.log(err), { enableHighAccuracy: true });
+        }
+    </script>
+</body>
+</html>
